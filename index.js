@@ -6,7 +6,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const config = require('./config');
-
+const FormData = require('form-data');
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -109,68 +109,156 @@ app.get('/api/proxy/editfoto2', async (req, res) => {
         const { url, prompt } = req.query;
         
         if (!url || !prompt) {
-            return res.status(400).json({ error: 'URL dan prompt diperlukan' });
+            return res.status(400).json({ 
+                status: false,
+                error: 'URL dan prompt diperlukan' 
+            });
         }
-
-        // Forward request ke ditss.biz.id
-        const response = await axios.get(`https://ditss.biz.id/api/ai/editfoto2`, {
-            params: { url, prompt },
-            timeout: 30000
+        
+        console.log('🔁 Proxy GET: Forwarding to ditss.biz.id', { 
+            url: url.substring(0, 50) + '...', 
+            prompt: prompt.substring(0, 30) + '...' 
         });
         
-        // Kirim response kembali ke client
+        const response = await axios.get('https://ditss.biz.id/api/ai/editfoto2', {
+            params: { url, prompt },
+            timeout: 60000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': 'application/json'
+            }
+        });
+        
+        console.log('✅ Proxy GET: Success');
         res.json(response.data);
         
     } catch (error) {
-        console.error('Proxy error:', error.message);
+        console.error('❌ Proxy GET Error:', error.message);
+        
+        let errorMessage = 'Terjadi kesalahan pada proxy';
+        if (error.code === 'ECONNREFUSED') {
+            errorMessage = 'Tidak dapat terhubung ke server ditss.biz.id';
+        } else if (error.code === 'ETIMEDOUT') {
+            errorMessage = 'Timeout: Server ditss.biz.id tidak merespons';
+        } else if (error.response) {
+            errorMessage = `Server error: ${error.response.status} - ${error.response.statusText}`;
+        }
+        
         res.status(500).json({ 
-            error: 'Terjadi kesalahan saat menghubungi server',
-            details: error.message 
+            status: false,
+            error: errorMessage,
+            details: error.message
         });
     }
 });
 
+// Proxy untuk AI Edit Foto - POST requests dengan file upload
 app.post('/api/proxy/editfoto2', async (req, res) => {
     try {
-        // Handle file upload melalui proxy
-        const form = formidable({});
+        const form = formidable({ 
+            multiples: false,
+            maxFileSize: 10 * 1024 * 1024 // 10MB
+        });
+        
         form.parse(req, async (err, fields, files) => {
             if (err) {
-                return res.status(400).json({ error: 'File upload failed' });
+                return res.status(400).json({ 
+                    status: false,
+                    error: 'File upload failed: ' + err.message 
+                });
             }
             
             const file = files.file?.[0];
             const prompt = fields.prompt?.[0];
             
-            if (!file || !prompt) {
-                return res.status(400).json({ error: 'File dan prompt diperlukan' });
+            if (!file) {
+                return res.status(400).json({ 
+                    status: false,
+                    error: 'File diperlukan' 
+                });
+            }
+            
+            if (!prompt) {
+                return res.status(400).json({ 
+                    status: false,
+                    error: 'Prompt diperlukan' 
+                });
             }
             
             try {
-                // Forward ke ditss.biz.id
+                console.log('🔁 Proxy POST: Forwarding file to ditss.biz.id', { 
+                    filename: file.originalFilename,
+                    size: file.size,
+                    prompt: prompt.substring(0, 30) + '...' 
+                });
+                
+                // Baca file sebagai buffer
+                const fileBuffer = fs.readFileSync(file.filepath);
+                
+                // Buat FormData untuk dikirim ke ditss.biz.id
                 const formData = new FormData();
-                formData.append('file', fs.createReadStream(file.filepath));
+                formData.append('file', fileBuffer, {
+                    filename: file.originalFilename || 'image.jpg',
+                    contentType: file.mimetype || 'image/jpeg'
+                });
                 formData.append('prompt', prompt);
                 
                 const response = await axios.post('https://ditss.biz.id/api/ai/editfoto2', formData, {
                     headers: {
-                        'Content-Type': 'multipart/form-data',
+                        ...formData.getHeaders(),
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                     },
-                    timeout: 30000
+                    timeout: 60000
                 });
                 
+                // Hapus file temporary
+                try {
+                    fs.unlinkSync(file.filepath);
+                } catch (cleanupError) {
+                    console.log('Cleanup warning:', cleanupError.message);
+                }
+                
+                console.log('✅ Proxy POST: Success');
                 res.json(response.data);
                 
             } catch (axiosError) {
+                console.error('❌ Axios Error:', axiosError.message);
+                
+                // Cleanup file temporary even on error
+                try {
+                    if (file && file.filepath) {
+                        fs.unlinkSync(file.filepath);
+                    }
+                } catch (cleanupError) {
+                    console.log('Cleanup warning:', cleanupError.message);
+                }
+                
+                let errorMessage = 'Gagal terhubung ke layanan AI';
+                if (axiosError.code === 'ECONNREFUSED') {
+                    errorMessage = 'Tidak dapat terhubung ke server ditss.biz.id';
+                } else if (axiosError.code === 'ETIMEDOUT') {
+                    errorMessage = 'Timeout: Proses AI terlalu lama';
+                } else if (axiosError.response) {
+                    errorMessage = `Server error: ${axiosError.response.status} - ${axiosError.response.statusText}`;
+                    if (axiosError.response.data && axiosError.response.data.error) {
+                        errorMessage = axiosError.response.data.error;
+                    }
+                }
+                
                 res.status(500).json({ 
-                    error: 'Proxy error', 
-                    details: axiosError.message 
+                    status: false,
+                    error: errorMessage,
+                    details: axiosError.message
                 });
             }
         });
         
     } catch (error) {
-        res.status(500).json({ error: 'Server error: ' + error.message });
+        console.error('❌ Proxy POST Error:', error.message);
+        res.status(500).json({ 
+            status: false,
+            error: 'Server error: ' + error.message 
+        });
     }
 });
 
