@@ -859,10 +859,10 @@ document.getElementById('submitBtn').addEventListener('click', async () => {
             const formData = new FormData();
             formData.append('file', file);
             formData.append('prompt', prompt);
-            const res = await fetch('/api/ai/editfoto2', { method: 'POST', body: formData });
+            const res = await fetch('/api/proxy/editfoto2', { method: 'POST', body: formData });
             data = await res.json();
         } else {
-            const url = `/api/ai/editfoto2?url=${encodeURIComponent(imageUrl)}&prompt=${encodeURIComponent(prompt)}`;
+            const url = `/api/proxy/editfoto2?url=${encodeURIComponent(imageUrl)}&prompt=${encodeURIComponent(prompt)}`;
             const res = await fetch(url);
             data = await res.json();
         }
