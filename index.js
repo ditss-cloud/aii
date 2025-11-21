@@ -1,6 +1,5 @@
 //const config = require('./config.js');
 require('dotenv').config();
-const axios = require('axios');
 const express = require('express');
 const { formidable } = require('formidable');
 const axios = require('axios');
