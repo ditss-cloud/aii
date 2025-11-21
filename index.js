@@ -1,5 +1,6 @@
 //const config = require('./config.js');
 require('dotenv').config();
+const axios = require('axios');
 const express = require('express');
 const { formidable } = require('formidable');
 const axios = require('axios');
@@ -103,6 +104,75 @@ app.get('/:code', async (req, res) => {
   } catch (error) {
     res.status(404).render('404');
   }
+});
+app.get('/api/proxy/editfoto2', async (req, res) => {
+    try {
+        const { url, prompt } = req.query;
+        
+        if (!url || !prompt) {
+            return res.status(400).json({ error: 'URL dan prompt diperlukan' });
+        }
+
+        // Forward request ke ditss.biz.id
+        const response = await axios.get(`https://ditss.biz.id/api/ai/editfoto2`, {
+            params: { url, prompt },
+            timeout: 30000
+        });
+        
+        // Kirim response kembali ke client
+        res.json(response.data);
+        
+    } catch (error) {
+        console.error('Proxy error:', error.message);
+        res.status(500).json({ 
+            error: 'Terjadi kesalahan saat menghubungi server',
+            details: error.message 
+        });
+    }
+});
+
+app.post('/api/proxy/editfoto2', async (req, res) => {
+    try {
+        // Handle file upload melalui proxy
+        const form = formidable({});
+        form.parse(req, async (err, fields, files) => {
+            if (err) {
+                return res.status(400).json({ error: 'File upload failed' });
+            }
+            
+            const file = files.file?.[0];
+            const prompt = fields.prompt?.[0];
+            
+            if (!file || !prompt) {
+                return res.status(400).json({ error: 'File dan prompt diperlukan' });
+            }
+            
+            try {
+                // Forward ke ditss.biz.id
+                const formData = new FormData();
+                formData.append('file', fs.createReadStream(file.filepath));
+                formData.append('prompt', prompt);
+                
+                const response = await axios.post('https://ditss.biz.id/api/ai/editfoto2', formData, {
+                    headers: {
+                        'Content-Type': 'multipart/form-data',
+                    },
+                    timeout: 30000
+                });
+                
+                res.json(response.data);
+                
+            } catch (axiosError) {
+                res.status(500).json({ 
+                    error: 'Proxy error', 
+                    details: axiosError.message 
+                });
+            }
+        });
+        
+    } catch (error) {
+        res.status(500).json({ error: 'Server error: ' + error.message });
+    }
 });
 
 app.listen(port, () => {
